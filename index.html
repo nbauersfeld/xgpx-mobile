@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1720">
-<title>Letzte Strecke</title>
+<title>Letzte Strecken</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -12,17 +12,17 @@
 <style>
   :root {
     --bg: #f4f5f7; --karte: #ffffff; --text: #16202a; --matt: #64707d;
-    --linie: #e4572e; --rand: #dfe3e8; --hinweis: #fff4d6; --hinweis-text: #6b5300; --start: #2e9e5b;
+    --linie: #e4572e; --zweite: #2f6fd6; --rand: #dfe3e8; --hinweis: #fff4d6; --hinweis-text: #6b5300; --start: #2e9e5b;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0f1720; --karte: #18222d; --text: #e8edf2; --matt: #93a1af;
-      --linie: #ff7a50; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
+      --linie: #ff7a50; --zweite: #6ea8ff; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0f1720; --karte: #18222d; --text: #e8edf2; --matt: #93a1af;
-    --linie: #ff7a50; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
+    --linie: #ff7a50; --zweite: #6ea8ff; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -37,6 +37,13 @@
   .wann { color: var(--matt); font-size: 14px; }
   button { font: inherit; color: var(--text); background: var(--karte); border: 1px solid var(--rand);
     border-radius: 10px; min-width: 44px; height: 44px; cursor: pointer; }
+  .navi { display: flex; align-items: center; justify-content: center; gap: 12px; margin: -4px 0 10px; }
+  .navi:empty, .navi[hidden] { display: none; }
+  .navi button { height: 34px; min-width: 44px; }
+  .navi span { color: var(--matt); font-size: 14px; font-variant-numeric: tabular-nums; min-width: 4em; text-align: center; }
+  .geraete { color: var(--matt); font-size: 13px; margin-top: 6px; }
+  .geraete:empty { display: none; }
+  .geraete i { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin: 0 4px 0 10px; }
   #karte { height: 52vh; min-height: 280px; border-radius: 14px; overflow: hidden;
     border: 1px solid var(--rand); background: var(--karte); }
   .zahlen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
@@ -67,7 +74,13 @@
     <button id="neu" title="Neu laden" aria-label="Neu laden">↻</button>
     <button id="einstellen" title="Einstellungen" aria-label="Einstellungen">⚙</button>
   </header>
+  <div class="navi" id="navi" hidden>
+    <button id="aelter" title="Älteres Training" aria-label="Älteres Training">‹</button>
+    <span id="stelle"></span>
+    <button id="neuer" title="Neueres Training" aria-label="Neueres Training">›</button>
+  </div>
   <div id="karte"></div>
+  <div class="geraete" id="geraete"></div>
   <div class="zahlen" id="zahlen"></div>
   <div class="profil"><span>Höhe</span><svg id="profil" viewBox="0 0 300 70" preserveAspectRatio="none"></svg></div>
 </main>
@@ -123,6 +136,12 @@ function zahlen(d) {
   if (d.geraet) liste.push([d.geraet, "Gerät"]);
   return liste;
 }
+function trainings(d) {
+  // Fassung 1 (bis 13.11.2026) hatte nur die eine letzte Aufzeichnung
+  if (d && d.strecken) return d.strecken.filter(t => t.aufzeichnungen && t.aufzeichnungen.length);
+  if (d && d.linie) return [{ aufzeichnungen: [d] }];
+  return [];
+}
 function profil(linie) {
   // Höhe über der Strecke, nicht über der Punktnummer: ein Punkt je 5 m
   // stimmt nur, wo die Uhr nicht stand
@@ -140,8 +159,22 @@ function profil(linie) {
 }
 // ------------------------------------------------------------------- rechnen:ende
 
-let karte = null, spur = null;
-function zeichnen(d) {
+let karte = null, spur = null, daten = null, stelle = 0;
+function farbe(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function zeigen(d) {
+  daten = trainings(d);
+  if (!daten.length) return;
+  stelle = Math.min(stelle, daten.length - 1);
+  $("navi").hidden = daten.length < 2;
+  $("stelle").textContent = `${stelle + 1} / ${daten.length}`;
+  $("aelter").disabled = stelle >= daten.length - 1;
+  $("neuer").disabled = stelle === 0;
+  zeichnen(daten[stelle].aufzeichnungen);
+}
+function zeichnen(aufzeichnungen) {
+  // Die Zahlen und das Profil von der ersten; weitere Geraete desselben
+  // Trainings als zweite Linie auf der Karte
+  const d = aufzeichnungen[0];
   $("titel").textContent = d.name || ARTEN[d.art] || "Letzte Strecke";
   $("wann").textContent = [ARTEN[d.art], datum(d.start)].filter(Boolean).join(" · ");
   const felder = zahlen(d);
@@ -153,7 +186,16 @@ function zeichnen(d) {
     if (w.length > 8) { b.style.fontSize = "14px"; b.style.whiteSpace = "normal"; }
     el.querySelector("span").textContent = n;
   });
-  const linie = getComputedStyle(document.documentElement).getPropertyValue("--linie").trim();
+  const farben = [farbe("--linie"), farbe("--zweite")];
+  const linie = farben[0];
+  $("geraete").innerHTML = "";
+  if (aufzeichnungen.length > 1) {
+    aufzeichnungen.forEach((a, i) => {
+      const f = document.createElement("i");
+      f.style.background = farben[Math.min(i, 1)];
+      $("geraete").append(f, `${a.geraet || "Gerät " + (i + 1)} ${komma(a.km, 2)} km`);
+    });
+  }
   const punkte = profil(d.linie);
   $("profil").innerHTML = punkte ?
     `<polygon points="0,70 ${punkte} 300,70" fill="${linie}" opacity="0.18"/>` +
@@ -166,10 +208,12 @@ function zeichnen(d) {
                   { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(karte);
     }
     if (spur) spur.remove();
-    const start = getComputedStyle(document.documentElement).getPropertyValue("--start").trim();
+    const weitere = aufzeichnungen.slice(1).map(a =>
+      L.polyline(a.linie.map(p => [p[0], p[1]]), { color: farben[1], weight: 4, opacity: 0.9 }));
     spur = L.layerGroup([
+      ...weitere,
       L.polyline(lagen, { color: linie, weight: 5, opacity: 0.95 }),
-      L.circleMarker(lagen[0], { radius: 6, color: "#fff", weight: 2, fillColor: start, fillOpacity: 1 }),
+      L.circleMarker(lagen[0], { radius: 6, color: "#fff", weight: 2, fillColor: farbe("--start"), fillOpacity: 1 }),
       L.circleMarker(lagen[lagen.length - 1], { radius: 6, color: "#fff", weight: 2, fillColor: linie, fillOpacity: 1 }),
     ]).addTo(karte);
     karte.fitBounds(L.latLngBounds(lagen), { padding: [20, 20] });
@@ -207,11 +251,11 @@ async function holen() {
     const text = await antwort.text();
     const d = JSON.parse(text);
     merke(SPEICHER.daten, text);
-    zeichnen(d);
+    zeigen(d);
   } catch (fehler) {
     const alt = lies(SPEICHER.daten);
     if (alt) {
-      zeichnen(JSON.parse(alt));
+      zeigen(JSON.parse(alt));
       $("hinweis").textContent = `Gespeicherter Stand - ${fehler.message || fehler}`;
     } else {
       $("hinweis").textContent = String(fehler.message || fehler);
@@ -232,11 +276,13 @@ $("dialog").addEventListener("close", () => {
 });
 $("einstellen").addEventListener("click", einstellen);
 $("neu").addEventListener("click", holen);
+$("aelter").addEventListener("click", () => { stelle++; zeigen({ strecken: daten }); });
+$("neuer").addEventListener("click", () => { stelle = Math.max(0, stelle - 1); zeigen({ strecken: daten }); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) holen(); });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 const gemerkt = lies(SPEICHER.daten);
-if (gemerkt) { try { zeichnen(JSON.parse(gemerkt)); } catch (e) { /* kaputt: gleich neu */ } }
+if (gemerkt) { try { zeigen(JSON.parse(gemerkt)); } catch (e) { /* kaputt: gleich neu */ } }
 holen();
 </script>
 </body>

@@ -1,6 +1,6 @@
 // Die Seite selbst ohne Netz: Huelle zwischenspeichern, die Strecke haelt
 // die Seite im localStorage. Kartenkacheln bleiben beim Browser.
-const STAND = "xgpx-mobile-1";
+const STAND = "xgpx-mobile-2";
 const HUELLE = [
   "./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css",
