@@ -131,7 +131,10 @@ function datum(iso) {
 function zahlen(d) {
   const [t, einheit] = tempo(d);
   const liste = [[komma(d.km, 2), "km"], [dauer(d.dauer_s), "Dauer"], [t, einheit]];
-  if (d.hm != null) liste.push([String(d.hm), "Höhenmeter"]);
+  // Höhenmeter aus dem Geländemodell, gleich für jedes Gerät; die der Uhr
+  // nur, wo es keine gibt - ohne Luftdruckmesser zählt sie das GPS-Rauschen mit
+  if (d.hm_gelaende != null) liste.push([String(d.hm_gelaende), "Höhenmeter"]);
+  else if (d.hm != null) liste.push([String(d.hm), "Hm (Uhr)"]);
   if (d.puls != null) liste.push([String(d.puls), "Puls Ø"]);
   if (d.geraet) liste.push([d.geraet, "Gerät"]);
   return liste;
