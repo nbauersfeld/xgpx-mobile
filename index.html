@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1720">
+<title>Letzte Strecke</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #f4f5f7; --karte: #ffffff; --text: #16202a; --matt: #64707d;
+    --linie: #e4572e; --rand: #dfe3e8; --hinweis: #fff4d6; --hinweis-text: #6b5300; --start: #2e9e5b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1720; --karte: #18222d; --text: #e8edf2; --matt: #93a1af;
+      --linie: #ff7a50; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1720; --karte: #18222d; --text: #e8edf2; --matt: #93a1af;
+    --linie: #ff7a50; --rand: #263240; --hinweis: #3a3215; --hinweis-text: #f3d98a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .hinweis { background: var(--hinweis); color: var(--hinweis-text); border-radius: 10px;
+    padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+  .hinweis:empty { display: none; }
+  header { display: flex; align-items: center; gap: 8px; margin: 4px 2px 12px; }
+  header div { flex: 1; min-width: 0; }
+  h1 { font-size: 22px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wann { color: var(--matt); font-size: 14px; }
+  button { font: inherit; color: var(--text); background: var(--karte); border: 1px solid var(--rand);
+    border-radius: 10px; min-width: 44px; height: 44px; cursor: pointer; }
+  #karte { height: 52vh; min-height: 280px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--rand); background: var(--karte); }
+  .zahlen { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .zahl { background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .zahl b { display: block; font-size: 20px; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zahl span { color: var(--matt); font-size: 12px; }
+  .profil { background: var(--karte); border: 1px solid var(--rand); border-radius: 12px;
+    padding: 10px 12px 6px; margin-top: 8px; }
+  .profil span { color: var(--matt); font-size: 12px; }
+  #profil { display: block; width: 100%; height: 70px; }
+  dialog { border: 1px solid var(--rand); border-radius: 14px; background: var(--karte); color: var(--text);
+    width: min(92vw, 420px); padding: 16px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog label { display: block; font-size: 13px; color: var(--matt); margin: 10px 0 4px; }
+  dialog input { width: 100%; font: inherit; padding: 10px; border-radius: 8px;
+    border: 1px solid var(--rand); background: var(--bg); color: var(--text); }
+  dialog p { font-size: 13px; color: var(--matt); margin: 10px 0 0; }
+  .knoepfe { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  .knoepfe button { padding: 0 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hinweis" id="hinweis"></div>
+  <header>
+    <div><h1 id="titel">Letzte Strecke</h1><div class="wann" id="wann"></div></div>
+    <button id="neu" title="Neu laden" aria-label="Neu laden">↻</button>
+    <button id="einstellen" title="Einstellungen" aria-label="Einstellungen">⚙</button>
+  </header>
+  <div id="karte"></div>
+  <div class="zahlen" id="zahlen"></div>
+  <div class="profil"><span>Höhe</span><svg id="profil" viewBox="0 0 300 70" preserveAspectRatio="none"></svg></div>
+</main>
+
+<dialog id="dialog">
+  <form method="dialog">
+    <b>Zugang</b>
+    <label for="repo">Repository der Sammlung (besitzer/name)</label>
+    <input id="repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="besitzer/xgpx-samples">
+    <label for="token">GitHub-Token (nur Lesen, nur dieses Repository)</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+    <p>Beides bleibt nur auf diesem Gerät.</p>
+    <div class="knoepfe"><button value="abbrechen">Abbrechen</button><button value="ok">Speichern</button></div>
+  </form>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const SPEICHER = { repo: "xgpx.repo", token: "xgpx.token", daten: "xgpx.letzte" };
+const ARTEN = { run: "Lauf", trail: "Traillauf", walk: "Gehen", hike: "Wandern",
+                road: "Rennrad", gravel: "E-Bike", ebike: "E-Bike", mtb: "MTB", cycling: "Rad" };
+
+function lies(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+function merke(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* privat: dann eben nicht */ } }
+const $ = id => document.getElementById(id);
+
+// --- Rechnen (in den Tests unter node nachgerechnet) ---------------- rechnen:anfang
+function zwei(x) { return String(Math.floor(x)).padStart(2, "0"); }
+function dauer(s) {
+  if (s == null) return "–";
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? `${h}:${zwei(m)}:${zwei(s % 60)}` : `${m}:${zwei(s % 60)}`;
+}
+function komma(x, stellen) { return x.toFixed(stellen).replace(".", ","); }
+function tempo(d) {
+  if (!d.tempo_ms) return ["–", d.zu_fuss ? "min/km" : "km/h"];
+  if (!d.zu_fuss) return [komma(d.tempo_ms * 3.6, 1), "km/h"];
+  const s = 1000 / d.tempo_ms;
+  return [`${Math.floor(s / 60)}:${zwei(Math.round(s % 60) % 60)}`, "min/km"];
+}
+function datum(iso) {
+  if (!iso) return "";
+  const t = new Date(iso);
+  const tag = t.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+  return `${tag}, ${t.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+}
+function zahlen(d) {
+  const [t, einheit] = tempo(d);
+  const liste = [[komma(d.km, 2), "km"], [dauer(d.dauer_s), "Dauer"], [t, einheit]];
+  if (d.hm != null) liste.push([String(d.hm), "Höhenmeter"]);
+  if (d.puls != null) liste.push([String(d.puls), "Puls Ø"]);
+  if (d.geraet) liste.push([d.geraet, "Gerät"]);
+  return liste;
+}
+function profil(linie) {
+  // Höhe über der Strecke, nicht über der Punktnummer: ein Punkt je 5 m
+  // stimmt nur, wo die Uhr nicht stand
+  const meter = [0];
+  for (let i = 1; i < linie.length; i++) {
+    const [a, b] = linie[i - 1], [c, e] = linie[i];
+    const k = Math.cos(a * Math.PI / 180);
+    meter.push(meter[i - 1] + Math.hypot((c - a) * 111320, (e - b) * 111320 * k));
+  }
+  const mit = linie.map((p, i) => [meter[i], p[2]]).filter(p => p[1] != null);
+  if (mit.length < 2) return "";
+  const hs = mit.map(p => p[1]), lo = Math.min(...hs), hi = Math.max(...hs) || lo + 1;
+  const ende = meter[meter.length - 1] || 1, spanne = (hi - lo) || 1;
+  return mit.map(([m, h]) => `${(m / ende * 300).toFixed(1)},${(64 - (h - lo) / spanne * 56).toFixed(1)}`).join(" ");
+}
+// ------------------------------------------------------------------- rechnen:ende
+
+let karte = null, spur = null;
+function zeichnen(d) {
+  $("titel").textContent = d.name || ARTEN[d.art] || "Letzte Strecke";
+  $("wann").textContent = [ARTEN[d.art], datum(d.start)].filter(Boolean).join(" · ");
+  const felder = zahlen(d);
+  $("zahlen").innerHTML = felder.map(() => `<div class="zahl"><b></b><span></span></div>`).join("");
+  felder.forEach(([w, n], i) => {
+    const el = $("zahlen").children[i], b = el.querySelector("b");
+    b.textContent = w;
+    // "Forerunner 735XT" passt in groß nicht in ein Drittel der Breite
+    if (w.length > 8) { b.style.fontSize = "14px"; b.style.whiteSpace = "normal"; }
+    el.querySelector("span").textContent = n;
+  });
+  const linie = getComputedStyle(document.documentElement).getPropertyValue("--linie").trim();
+  const punkte = profil(d.linie);
+  $("profil").innerHTML = punkte ?
+    `<polygon points="0,70 ${punkte} 300,70" fill="${linie}" opacity="0.18"/>` +
+    `<polyline points="${punkte}" fill="none" stroke="${linie}" stroke-width="2" vector-effect="non-scaling-stroke"/>` : "";
+  const lagen = d.linie.map(p => [p[0], p[1]]);
+  if (window.L) {
+    if (!karte) {
+      karte = L.map("karte", { zoomControl: false });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                  { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(karte);
+    }
+    if (spur) spur.remove();
+    const start = getComputedStyle(document.documentElement).getPropertyValue("--start").trim();
+    spur = L.layerGroup([
+      L.polyline(lagen, { color: linie, weight: 5, opacity: 0.95 }),
+      L.circleMarker(lagen[0], { radius: 6, color: "#fff", weight: 2, fillColor: start, fillOpacity: 1 }),
+      L.circleMarker(lagen[lagen.length - 1], { radius: 6, color: "#fff", weight: 2, fillColor: linie, fillOpacity: 1 }),
+    ]).addTo(karte);
+    karte.fitBounds(L.latLngBounds(lagen), { padding: [20, 20] });
+  } else {
+    svgSpur(lagen, linie);
+  }
+}
+function svgSpur(lagen, linie) {
+  // Ohne Leaflet (kein Netz beim ersten Start): die Linie ohne Karte
+  const box = $("karte"), b = box.clientWidth || 340, h = box.clientHeight || 300, rand = 24;
+  const kx = Math.cos(lagen[0][0] * Math.PI / 180);
+  const xs = lagen.map(p => p[1] * kx), ys = lagen.map(p => p[0]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const m = Math.min((b - 2 * rand) / ((x1 - x0) || 1e-9), (h - 2 * rand) / ((y1 - y0) || 1e-9));
+  const dx = (b - (x1 - x0) * m) / 2, dy = (h - (y1 - y0) * m) / 2;
+  const pkt = lagen.map((p, i) => `${(dx + (xs[i] - x0) * m).toFixed(1)},${(h - dy - (ys[i] - y0) * m).toFixed(1)}`);
+  box.innerHTML = `<svg viewBox="0 0 ${b} ${h}" style="width:100%;height:100%"><polyline points="${pkt.join(" ")}"
+    fill="none" stroke="${linie}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+async function holen() {
+  const repo = lies(SPEICHER.repo), token = lies(SPEICHER.token);
+  if (!repo || !token) { einstellen(); return; }
+  $("hinweis").textContent = "";
+  try {
+    const antwort = await fetch(`https://api.github.com/repos/${repo}/contents/mobile/letzte.json`, {
+      headers: { Accept: "application/vnd.github.raw+json", Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (antwort.status === 401 || antwort.status === 403)
+      throw new Error("Token abgelehnt - abgelaufen oder ohne Leserecht auf das Repository");
+    if (antwort.status === 404)
+      throw new Error("mobile/letzte.json nicht gefunden - Repository richtig? Hat xgpx schon abgeglichen?");
+    if (!antwort.ok) throw new Error(`GitHub antwortet ${antwort.status}`);
+    const text = await antwort.text();
+    const d = JSON.parse(text);
+    merke(SPEICHER.daten, text);
+    zeichnen(d);
+  } catch (fehler) {
+    const alt = lies(SPEICHER.daten);
+    if (alt) {
+      zeichnen(JSON.parse(alt));
+      $("hinweis").textContent = `Gespeicherter Stand - ${fehler.message || fehler}`;
+    } else {
+      $("hinweis").textContent = String(fehler.message || fehler);
+    }
+  }
+}
+
+function einstellen() {
+  $("repo").value = lies(SPEICHER.repo);
+  $("token").value = lies(SPEICHER.token);
+  $("dialog").showModal();
+}
+$("dialog").addEventListener("close", () => {
+  if ($("dialog").returnValue !== "ok") return;
+  merke(SPEICHER.repo, $("repo").value.trim().replace(/^https:\/\/github\.com\//, "").replace(/\/$/, ""));
+  merke(SPEICHER.token, $("token").value.trim());
+  holen();
+});
+$("einstellen").addEventListener("click", einstellen);
+$("neu").addEventListener("click", holen);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) holen(); });
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+const gemerkt = lies(SPEICHER.daten);
+if (gemerkt) { try { zeichnen(JSON.parse(gemerkt)); } catch (e) { /* kaputt: gleich neu */ } }
+holen();
+</script>
+</body>
+</html>
