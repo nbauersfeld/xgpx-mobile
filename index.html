@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <style>
   :root {
     --bg: #f4f5f7; --karte: #ffffff; --text: #16202a; --matt: #64707d;
@@ -97,7 +97,7 @@
   </form>
 </dialog>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <script>
 "use strict";
 const SPEICHER = { repo: "xgpx.repo", token: "xgpx.token", daten: "xgpx.letzte" };
@@ -162,7 +162,7 @@ function profil(linie) {
 }
 // ------------------------------------------------------------------- rechnen:ende
 
-let karte = null, spur = null, daten = null, stelle = 0;
+let karte = null, daten = null, stelle = 0;
 function farbe(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function zeigen(d) {
   daten = trainings(d);
@@ -204,28 +204,55 @@ function zeichnen(aufzeichnungen) {
     `<polygon points="0,70 ${punkte} 300,70" fill="${linie}" opacity="0.18"/>` +
     `<polyline points="${punkte}" fill="none" stroke="${linie}" stroke-width="2" vector-effect="non-scaling-stroke"/>` : "";
   const lagen = d.linie.map(p => [p[0], p[1]]);
-  if (window.L) {
-    if (!karte) {
-      karte = L.map("karte", { zoomControl: false });
-      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                  { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(karte);
-    }
-    if (spur) spur.remove();
-    const weitere = aufzeichnungen.slice(1).map(a =>
-      L.polyline(a.linie.map(p => [p[0], p[1]]), { color: farben[1], weight: 4, opacity: 0.9 }));
-    spur = L.layerGroup([
-      ...weitere,
-      L.polyline(lagen, { color: linie, weight: 5, opacity: 0.95 }),
-      L.circleMarker(lagen[0], { radius: 6, color: "#fff", weight: 2, fillColor: farbe("--start"), fillOpacity: 1 }),
-      L.circleMarker(lagen[lagen.length - 1], { radius: 6, color: "#fff", weight: 2, fillColor: linie, fillOpacity: 1 }),
-    ]).addTo(karte);
-    karte.fitBounds(L.latLngBounds(lagen), { padding: [20, 20] });
-  } else {
-    svgSpur(lagen, linie);
+  if (window.maplibregl) {
+    try { karteZeichnen(aufzeichnungen, farben); return; } catch (e) { karte = null; /* ohne WebGL */ }
   }
+  svgSpur(lagen, linie);
+}
+let karteBereit = null;
+function karteZeichnen(aufzeichnungen, farben) {
+  // [lon, lat] - MapLibre will die Länge zuerst
+  const linien = aufzeichnungen.map(a => a.linie.map(p => [p[1], p[0]]));
+  const haupt = linien[0];
+  if (!karte) {
+    $("karte").innerHTML = "";
+    karte = new maplibregl.Map({
+      container: "karte", center: haupt[0], zoom: 13, attributionControl: { compact: true },
+      style: { version: 8,
+        sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+                          tileSize: 256, maxzoom: 19, attribution: "© OpenStreetMap-Mitwirkende" } },
+        layers: [{ id: "osm", type: "raster", source: "osm" }] },
+    });
+    karteBereit = new Promise(fertig => karte.on("load", () => {
+      const leer = { type: "FeatureCollection", features: [] };
+      karte.addSource("spuren", { type: "geojson", data: leer });
+      karte.addLayer({ id: "spuren", type: "line", source: "spuren",
+        layout: { "line-join": "round", "line-cap": "round", "line-sort-key": ["get", "rang"] },
+        paint: { "line-color": ["get", "farbe"], "line-width": ["get", "breite"], "line-opacity": 0.95 } });
+      karte.addSource("enden", { type: "geojson", data: leer });
+      karte.addLayer({ id: "enden", type: "circle", source: "enden",
+        paint: { "circle-radius": 6, "circle-color": ["get", "farbe"],
+                 "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+      fertig();
+    }));
+  }
+  karteBereit.then(() => {
+    const linie = (lage, eigen) => ({ type: "Feature", properties: eigen,
+                                     geometry: { type: "LineString", coordinates: lage } });
+    const punkt = (lage, f) => ({ type: "Feature", properties: { farbe: f },
+                                  geometry: { type: "Point", coordinates: lage } });
+    // Die erste Aufzeichnung obenauf, die weiteren Geräte darunter
+    karte.getSource("spuren").setData({ type: "FeatureCollection", features: linien.map((l, i) =>
+      linie(l, i ? { farbe: farben[1], breite: 4, rang: 0 } : { farbe: farben[0], breite: 5, rang: 1 })) });
+    karte.getSource("enden").setData({ type: "FeatureCollection", features: [
+      punkt(haupt[0], farbe("--start")), punkt(haupt[haupt.length - 1], farben[0])] });
+    const rahmen = new maplibregl.LngLatBounds(haupt[0], haupt[0]);
+    haupt.forEach(p => rahmen.extend(p));
+    karte.fitBounds(rahmen, { padding: 24, animate: false, maxZoom: 17 });
+  });
 }
 function svgSpur(lagen, linie) {
-  // Ohne Leaflet (kein Netz beim ersten Start): die Linie ohne Karte
+  // Ohne MapLibre (kein Netz beim ersten Start, kein WebGL): die Linie ohne Karte
   const box = $("karte"), b = box.clientWidth || 340, h = box.clientHeight || 300, rand = 24;
   const kx = Math.cos(lagen[0][0] * Math.PI / 180);
   const xs = lagen.map(p => p[1] * kx), ys = lagen.map(p => p[0]);

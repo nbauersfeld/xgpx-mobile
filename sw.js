@@ -1,10 +1,10 @@
 // Die Seite selbst ohne Netz: Huelle zwischenspeichern, die Strecke haelt
 // die Seite im localStorage. Kartenkacheln bleiben beim Browser.
-const STAND = "xgpx-mobile-3";
+const STAND = "xgpx-mobile-4";
 const HUELLE = [
   "./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png",
-  "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css",
-  "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js",
+  "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css",
+  "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js",
 ];
 
 self.addEventListener("install", e => {
