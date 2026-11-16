@@ -1,6 +1,6 @@
 // Die Seite selbst ohne Netz: Huelle zwischenspeichern, die Strecke haelt
 // die Seite im localStorage. Kartenkacheln bleiben beim Browser.
-const STAND = "xgpx-mobile-4";
+const STAND = "xgpx-mobile-9";
 const HUELLE = [
   "./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css",
@@ -23,8 +23,11 @@ self.addEventListener("fetch", e => {
   if (e.request.method !== "GET" || url.hostname === "api.github.com") return;
   const eigen = url.origin === self.location.origin;
   if (!eigen && !HUELLE.includes(e.request.url)) return;
-  // Erst das Netz (neue Fassung der Seite), ohne Netz der Speicher
-  e.respondWith(fetch(e.request)
+  // Erst das Netz (neue Fassung der Seite), ohne Netz der Speicher. Die
+  // eigenen Dateien am HTTP-Speicher vorbei: github.io erlaubt ihn 10 min,
+  // und so lange kam nach dem Hochladen noch die alte Seite
+  const holen = eigen ? fetch(e.request.url, { cache: "no-cache" }) : fetch(e.request);
+  e.respondWith(holen
     .then(antwort => {
       if (antwort.ok) {
         const kopie = antwort.clone();

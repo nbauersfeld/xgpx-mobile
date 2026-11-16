@@ -71,6 +71,7 @@
   <div class="hinweis" id="hinweis"></div>
   <header>
     <div><h1 id="titel">Letzte Strecke</h1><div class="wann" id="wann"></div></div>
+    <button id="garmin" title="Neu bei Garmin holen" aria-label="Neu bei Garmin holen">⤓</button>
     <button id="neu" title="Neu laden" aria-label="Neu laden">↻</button>
     <button id="einstellen" title="Einstellungen" aria-label="Einstellungen">⚙</button>
   </header>
@@ -90,9 +91,9 @@
     <b>Zugang</b>
     <label for="repo">Repository der Sammlung (besitzer/name)</label>
     <input id="repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="besitzer/xgpx-samples">
-    <label for="token">GitHub-Token (nur Lesen, nur dieses Repository)</label>
+    <label for="token">GitHub-Token (nur dieses Repository: Contents lesen, Actions starten)</label>
     <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
-    <p>Beides bleibt nur auf diesem Gerät.</p>
+    <p>Beides bleibt nur auf diesem Gerät. ⤓ startet die Action, die bei Garmin holt.</p>
     <div class="knoepfe"><button value="abbrechen">Abbrechen</button><button value="ok">Speichern</button></div>
   </form>
 </dialog>
@@ -102,7 +103,7 @@
 "use strict";
 const SPEICHER = { repo: "xgpx.repo", token: "xgpx.token", daten: "xgpx.letzte" };
 const ARTEN = { run: "Lauf", trail: "Traillauf", walk: "Gehen", hike: "Wandern",
-                road: "Rennrad", gravel: "E-Bike", ebike: "E-Bike", mtb: "MTB", cycling: "Rad" };
+                road: "Rennrad", gravel: "Gravel", ebike: "E-Bike", mtb: "MTB", cycling: "Rad" };
 
 function lies(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
 function merke(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* privat: dann eben nicht */ } }
@@ -128,13 +129,25 @@ function datum(iso) {
   const tag = t.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
   return `${tag}, ${t.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
 }
-function zahlen(d) {
+function hoehenmeter(aufzeichnungen) {
+  // Aus dem DGM1 der Länder zuerst, gleich für jedes Gerät; sonst ein Gerät
+  // mit Luftdruckmesser, auch wenn es das zweite ist; dann das grobe
+  // Geländemodell - das zählt am Hang zu viel, ohne Barometer zählt die Uhr
+  // das GPS-Rauschen mit
+  const fein = aufzeichnungen.find(a => a.hm_dgm1 && a.hm_gelaende != null);
+  if (fein) return [String(fein.hm_gelaende), "Höhenmeter"];
+  const baro = aufzeichnungen.find(a => a.barometer && a.hm != null);
+  if (baro) return [String(baro.hm), "Höhenmeter"];
+  const d = aufzeichnungen[0];
+  if (d.hm_gelaende != null) return [String(d.hm_gelaende), "Höhenmeter"];
+  if (d.hm != null) return [String(d.hm), "Hm (Uhr)"];
+  return null;
+}
+function zahlen(d, aufzeichnungen) {
   const [t, einheit] = tempo(d);
   const liste = [[komma(d.km, 2), "km"], [dauer(d.dauer_s), "Dauer"], [t, einheit]];
-  // Höhenmeter aus dem Geländemodell, gleich für jedes Gerät; die der Uhr
-  // nur, wo es keine gibt - ohne Luftdruckmesser zählt sie das GPS-Rauschen mit
-  if (d.hm_gelaende != null) liste.push([String(d.hm_gelaende), "Höhenmeter"]);
-  else if (d.hm != null) liste.push([String(d.hm), "Hm (Uhr)"]);
+  const hm = hoehenmeter(aufzeichnungen || [d]);
+  if (hm) liste.push(hm);
   if (d.puls != null) liste.push([String(d.puls), "Puls Ø"]);
   if (d.geraet) liste.push([d.geraet, "Gerät"]);
   return liste;
@@ -160,6 +173,17 @@ function profil(linie) {
   const ende = meter[meter.length - 1] || 1, spanne = (hi - lo) || 1;
   return mit.map(([m, h]) => `${(m / ende * 300).toFixed(1)},${(64 - (h - lo) / spanne * 56).toFixed(1)}`).join(" ");
 }
+function abholStand(antwort, seit) {
+  // Der Lauf der Action, den der Knopf gestartet hat: der jüngste, der nach
+  // dem Druck (minus etwas Uhrabweichung) angelegt wurde
+  const lauf = ((antwort && antwort.workflow_runs) || [])
+    .find(l => Date.parse(l.created_at) >= seit - 60000);
+  if (!lauf) return { fertig: false, text: "Action startet …" };
+  if (lauf.status !== "completed")
+    return { fertig: false, text: lauf.status === "in_progress" ? "holt bei Garmin …" : "Action wartet …" };
+  if (lauf.conclusion === "success") return { fertig: true, ok: true, text: "" };
+  return { fertig: true, ok: false, text: `Abholen ging nicht (${lauf.conclusion}) - Details unter Actions in GitHub` };
+}
 // ------------------------------------------------------------------- rechnen:ende
 
 let karte = null, daten = null, stelle = 0;
@@ -180,7 +204,7 @@ function zeichnen(aufzeichnungen) {
   const d = aufzeichnungen[0];
   $("titel").textContent = d.name || ARTEN[d.art] || "Letzte Strecke";
   $("wann").textContent = [ARTEN[d.art], datum(d.start)].filter(Boolean).join(" · ");
-  const felder = zahlen(d);
+  const felder = zahlen(d, aufzeichnungen);
   $("zahlen").innerHTML = felder.map(() => `<div class="zahl"><b></b><span></span></div>`).join("");
   felder.forEach(([w, n], i) => {
     const el = $("zahlen").children[i], b = el.querySelector("b");
@@ -293,6 +317,46 @@ async function holen() {
   }
 }
 
+let holt = false;
+async function beiGarminHolen() {
+  // Kein Rechner muss an sein: die Action in der Sammlung holt bei Garmin,
+  // rechnet und schreibt mobile/letzte.json (xgpx/abholen.py)
+  const repo = lies(SPEICHER.repo), token = lies(SPEICHER.token);
+  if (!repo || !token) { einstellen(); return; }
+  if (holt) return;
+  holt = true;
+  $("garmin").disabled = true;
+  const api = `https://api.github.com/repos/${repo}/actions/workflows/abholen.yml`;
+  const kopf = { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` };
+  const seit = Date.now();
+  try {
+    const start = await fetch(`${api}/dispatches`, { method: "POST", headers: kopf,
+                                                      body: JSON.stringify({ ref: "main" }) });
+    if (start.status === 401 || start.status === 403)
+      throw new Error("Token darf keine Action starten - in GitHub 'Actions: Read and write' ergänzen");
+    if (start.status === 404) throw new Error("Action 'abholen' nicht gefunden - liegt abholen.yml in der Sammlung?");
+    if (!start.ok) throw new Error(`GitHub antwortet ${start.status}`);
+    for (let runde = 0; runde < 60; runde++) {
+      await new Promise(weiter => setTimeout(weiter, 8000));
+      const antwort = await fetch(`${api}/runs?event=workflow_dispatch&per_page=5`, { headers: kopf, cache: "no-store" });
+      if (!antwort.ok) continue;
+      const stand = abholStand(await antwort.json(), seit);
+      const s = Math.round((Date.now() - seit) / 1000);
+      $("hinweis").textContent = stand.text ? `${stand.text} ${Math.floor(s / 60)}:${zwei(s % 60)}` : "";
+      if (stand.fertig) {
+        if (stand.ok) { stelle = 0; await holen(); }
+        return;
+      }
+    }
+    $("hinweis").textContent = "Die Action braucht ungewöhnlich lange - später ↻";
+  } catch (fehler) {
+    $("hinweis").textContent = String(fehler.message || fehler);
+  } finally {
+    holt = false;
+    $("garmin").disabled = false;
+  }
+}
+
 function einstellen() {
   $("repo").value = lies(SPEICHER.repo);
   $("token").value = lies(SPEICHER.token);
@@ -306,6 +370,7 @@ $("dialog").addEventListener("close", () => {
 });
 $("einstellen").addEventListener("click", einstellen);
 $("neu").addEventListener("click", holen);
+$("garmin").addEventListener("click", beiGarminHolen);
 $("aelter").addEventListener("click", () => { stelle++; zeigen({ strecken: daten }); });
 $("neuer").addEventListener("click", () => { stelle = Math.max(0, stelle - 1); zeigen({ strecken: daten }); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) holen(); });
