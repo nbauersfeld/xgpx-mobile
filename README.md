@@ -1,12 +1,46 @@
-# xgpx-mobile – die letzte Strecke auf dem Handy
+# xgpx-mobile – die letzten Strecken auf dem Handy
 
-Eine installierbare Webseite (PWA), die die zuletzt aufgezeichnete Strecke zeigt:
-Karte, km, Dauer, Tempo, Höhenmeter, Puls, Gerät und Höhenprofil.
+Eine installierbare Webseite (PWA), die die letzten vier Trainings zeigt, mit
+‹ › zu blättern: Karte, km, Dauer, Tempo, Höhenmeter, Puls, Gerät,
+Höhenprofil und Splits. Was genau wo steht, sagt „Was die Seite zeigt“ unten.
 
 Die Seite selbst enthält **keine Daten** und darf öffentlich liegen. Die Strecke
 schreibt xgpx als `mobile/letzte.json` in das private Repository der Sammlung
 (`xgpx-samples`). Die Seite holt sie über die GitHub-API mit einem Token, das nur
 dieses eine Repository lesen darf. Repository und Token bleiben auf dem Handy.
+
+## Was die Seite zeigt
+
+Von oben nach unten:
+
+- **Kopf:** Name des Trainings (sonst die Art),
+  darunter Art, Wochentag, Datum und Startzeit. Rechts drei Knöpfe: **⤓** neu
+  bei Garmin holen (siehe unten), **↻** neu laden, **⚙** Zugang.
+- **‹ 1 / 4 ›:** blättert durch die letzten vier Trainings, das neueste zuerst.
+  Aufzeichnungen, die höchstens 10 Minuten nacheinander starten, gelten als
+  *ein* Training mit zwei Geräten und belegen nur einen Platz.
+- **Karte** (OpenStreetMap): die ganze Strecke mit Anfang und Ende, ohne
+  Privatzone. Sie ist in der **Pace-Farbe** eingefärbt, schnell rot, langsam
+  blau, wie `color pace` im xgpx-Fenster. Der grüne Punkt ist der Start. Eine
+  zweite Uhr am selben Training liegt als blaue Linie darunter, und unter der
+  Karte stehen beide Geräte mit ihren Kilometern.
+- **Zahlen:** Kilometer, Dauer (mit Pausen), Tempo (zu Fuß in min/km, auf dem
+  Rad in km/h), Höhenmeter, Puls im Mittel und das Gerät. Die Höhenmeter kommen
+  aus dem Geländemodell DGM1 und sind damit für jedes Gerät gleich. Ohne DGM1
+  zählt die Uhr mit Luftdruckmesser, sonst das grobe Geländemodell; nur ohne
+  alles steht der Wert der Uhr da, als „Hm (Uhr)“. Eine Uhr ohne Luftdruckmesser
+  zählt das Rauschen der GPS-Höhe mit (214 statt 92 Hm).
+- **Höhenprofil** über der Strecke, ebenfalls in der Pace-Farbe. Darunter die
+  Skala von der langsamsten zur schnellsten Pace des Trainings, ohne die
+  äußersten 5 % (eine Ampel streckt die Skala sonst).
+- **Splits:** zu Fuß je Kilometer, auf dem Rad je 5 km. Je Zeile stehen bis
+  wohin, ein Balken in der Pace-Farbe (je länger, desto schneller), die Pace
+  bzw. km/h und die Höhe vom Anfang zum Ende des Splits (nicht aufsummiert).
+  Der letzte Split zeigt seine Länge, etwa „6,01“.
+
+Zahlen, Profil und Splits stammen von der ersten Aufzeichnung eines Trainings.
+Ohne Netz zeigt die Seite den zuletzt geholten Stand; der gelbe Hinweis oben
+sagt dann, warum nicht neu geholt wurde.
 
 ## Einrichten
 
@@ -60,6 +94,41 @@ hoch. Auf github.com unter `xgpx-samples/mobile/` nachsehen, ob sie da ist.
 
 Die Seite lädt bei jedem Öffnen neu, **↻** lädt von Hand, **⚙** ändert den
 Zugang. Ohne Netz zeigt sie den zuletzt geholten Stand.
+
+## Neu holen ohne Rechner (Knopf ⤓)
+
+Ohne diesen Knopf zeigt die Seite, was ein Rechner zuletzt mit `garmin fetch`
+geholt hat. **⤓** startet stattdessen eine GitHub Action in `xgpx-samples`: sie
+holt die jüngsten Aktivitäten bei Garmin, rechnet die Höhenmeter, schreibt
+`mobile/letzte.json` und lädt hoch. Nach zwei bis drei Minuten zeigt die Seite
+den neuen Lauf; oben steht, wie weit sie ist. Jeder Druck kostet rund drei
+Minuten vom Kontingent für GitHub Actions.
+
+Die Action meldet sich mit einer **eigenen** Garmin-Anmeldung an, nicht mit
+der des Rechners: Garmin erneuert sein Token mit jedem Abruf, und zwei Stellen
+mit demselben Token würden sich gegenseitig abmelden. Das Token liegt
+verschlüsselt in der Sammlung (`.abholen/garmin.wallet`); den Schlüssel kennt
+nur das Secret der Action.
+
+Einmal einrichten:
+
+1. In der xgpx-Shell `garmin login github`: E-Mail, Passwort, ggf. Code.
+   Danach steht ein Schlüssel auf dem Bildschirm (nur dieses eine Mal).
+2. Auf github.com in **`xgpx-samples` → Settings → Secrets and variables →
+   Actions → New repository secret**: Name `XGPX_ABHOLEN_SCHLUESSEL`, Wert der
+   Schlüssel aus Schritt 1.
+3. Die Action braucht den Code von xgpx. Ein zweites Fine-grained-Token anlegen
+   (wie oben in Schritt 3): Name `xgpx-code`, **Only select repositories →
+   `xgpx`**, **Contents: Read-only**. In `xgpx-samples` als Secret `XGPX_CODE`
+   ablegen.
+4. Das Token auf dem Handy erweitern: **Settings → Developer settings →
+   Fine-grained tokens → xgpx-mobile → Edit**, unter Repository permissions
+   zusätzlich **Actions: Read and write**, **Update**. Der Token selbst bleibt
+   derselbe, auf dem Handy ändert sich nichts.
+5. `index.html` und `sw.js` neu hochladen (siehe unten).
+
+Die Action selbst (`.github/workflows/abholen.yml` in `xgpx-samples`) legt
+xgpx dort ab; die Vorlage ist `mobile/abholen.yml`.
 
 ## Neue Fassung der Seite
 
