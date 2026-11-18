@@ -55,6 +55,19 @@
     padding: 10px 12px 6px; margin-top: 8px; }
   .profil span { color: var(--matt); font-size: 12px; }
   #profil { display: block; width: 100%; height: 70px; }
+  .skala { display: flex; align-items: center; gap: 8px; color: var(--matt); font-size: 12px; margin-top: 4px;
+    font-variant-numeric: tabular-nums; }
+  .skala:empty { display: none; }
+  .skala i { flex: 1; height: 6px; border-radius: 3px; }
+  .splits { background: var(--karte); border: 1px solid var(--rand); border-radius: 12px;
+    padding: 8px 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .splits:empty { display: none; }
+  .split { display: grid; grid-template-columns: 3.2em 1fr 4.6em 3.6em; align-items: center; gap: 8px;
+    font-size: 14px; padding: 3px 0; }
+  .split.kopf { color: var(--matt); font-size: 12px; }
+  .split .balken { height: 8px; border-radius: 4px; min-width: 4px; }
+  .split .r { text-align: right; }
+  .split .m { color: var(--matt); }
   dialog { border: 1px solid var(--rand); border-radius: 14px; background: var(--karte); color: var(--text);
     width: min(92vw, 420px); padding: 16px; }
   dialog::backdrop { background: rgba(0, 0, 0, .45); }
@@ -83,7 +96,9 @@
   <div id="karte"></div>
   <div class="geraete" id="geraete"></div>
   <div class="zahlen" id="zahlen"></div>
-  <div class="profil"><span>Höhe</span><svg id="profil" viewBox="0 0 300 70" preserveAspectRatio="none"></svg></div>
+  <div class="profil"><span>Höhe</span><svg id="profil" viewBox="0 0 300 70" preserveAspectRatio="none"></svg>
+    <div class="skala" id="skala"></div></div>
+  <div class="splits" id="splits"></div>
 </main>
 
 <dialog id="dialog">
@@ -158,15 +173,53 @@ function trainings(d) {
   if (d && d.linie) return [{ aufzeichnungen: [d] }];
   return [];
 }
-function profil(linie) {
-  // Höhe über der Strecke, nicht über der Punktnummer: ein Punkt je 5 m
-  // stimmt nur, wo die Uhr nicht stand
+function meterListe(linie) {
   const meter = [0];
   for (let i = 1; i < linie.length; i++) {
     const [a, b] = linie[i - 1], [c, e] = linie[i];
     const k = Math.cos(a * Math.PI / 180);
     meter.push(meter[i - 1] + Math.hypot((c - a) * 111320, (e - b) * 111320 * k));
   }
+  return meter;
+}
+// Wie 'color pace' im Fenster (Turbo): schnell rot, langsam blau
+const TURBO = ["#30123b", "#4145ab", "#4675ed", "#39a2fc", "#1bcfd4", "#24eca6", "#61fc6c", "#a4fc3b",
+               "#d1e834", "#f3c63a", "#fe9b2d", "#f36315", "#d93806", "#b11901", "#7a0402"];
+function grenzenTempo(werte) {
+  // 5. bis 95. Perzentil: eine Ampel oder ein Sprint am Ende zögen sonst die Skala
+  const v = werte.filter(x => x != null && x > 0.3).sort((a, b) => a - b);
+  if (v.length < 2) return null;
+  const lo = v[Math.floor(0.05 * (v.length - 1))], hi = v[Math.ceil(0.95 * (v.length - 1))];
+  return hi > lo ? [lo, hi] : [lo, lo + 0.1];
+}
+function tempoFarbe(v, grenzen) {
+  if (v == null || !grenzen) return null;
+  const a = Math.min(1, Math.max(0, (v - grenzen[0]) / (grenzen[1] - grenzen[0])));
+  return TURBO[Math.round(a * (TURBO.length - 1))];
+}
+function stuecke(linie, grenzen) {
+  // Aneinander, was dieselbe Farbe hat - eine Linie je Farbwechsel statt je Punkt
+  const teile = [];
+  for (let i = 1; i < linie.length; i++) {
+    const f = tempoFarbe(linie[i][3], grenzen) || TURBO[0];
+    const letztes = teile[teile.length - 1];
+    if (letztes && letztes.farbe === f) letztes.punkte.push(linie[i]);
+    else teile.push({ farbe: f, punkte: [linie[i - 1], linie[i]] });
+  }
+  return teile;
+}
+function splitZeilen(d) {
+  // [bis km, Dauer, Pace bzw. km/h, Höhe, Anteil am schnellsten] je Split
+  const s = d.splits || [];
+  const schnellster = Math.max(...s.map(x => x.tempo_ms || 0)) || 1;
+  return s.map(x => [komma(x.km, x.km % 1 ? 2 : 0), dauer(x.dauer_s), tempo({ zu_fuss: d.zu_fuss, tempo_ms: x.tempo_ms })[0],
+                     x.hm == null ? "" : (x.hm > 0 ? "+" : x.hm < 0 ? "−" : "±") + Math.abs(x.hm),
+                     (x.tempo_ms || 0) / schnellster, x.tempo_ms]);
+}
+function profil(linie) {
+  // Höhe über der Strecke, nicht über der Punktnummer: ein Punkt je 5 m
+  // stimmt nur, wo die Uhr nicht stand
+  const meter = meterListe(linie);
   const mit = linie.map((p, i) => [meter[i], p[2]]).filter(p => p[1] != null);
   if (mit.length < 2) return "";
   const hs = mit.map(p => p[1]), lo = Math.min(...hs), hi = Math.max(...hs) || lo + 1;
@@ -223,18 +276,43 @@ function zeichnen(aufzeichnungen) {
       $("geraete").append(f, `${a.geraet || "Gerät " + (i + 1)} ${komma(a.km, 2)} km`);
     });
   }
+  // Strecke und Profil in der Pace-Farbe, wo die Datei das Tempo je Punkt hat
+  // (seit Fassung 6); sonst einfarbig wie vorher
+  const grenzen = grenzenTempo(d.linie.map(p => p[3]));
   const punkte = profil(d.linie);
-  $("profil").innerHTML = punkte ?
-    `<polygon points="0,70 ${punkte} 300,70" fill="${linie}" opacity="0.18"/>` +
-    `<polyline points="${punkte}" fill="none" stroke="${linie}" stroke-width="2" vector-effect="non-scaling-stroke"/>` : "";
+  let strich = linie, verlauf = "";
+  if (grenzen && punkte) {
+    const meter = meterListe(d.linie), ende = meter[meter.length - 1] || 1;
+    const schritt = Math.max(1, Math.floor(d.linie.length / 120));
+    const stops = [];
+    for (let i = 0; i < d.linie.length; i += schritt) {
+      const f = tempoFarbe(d.linie[i][3], grenzen);
+      if (f) stops.push(`<stop offset="${(meter[i] / ende).toFixed(4)}" stop-color="${f}"/>`);
+    }
+    verlauf = `<defs><linearGradient id="pace" x1="0" x2="1" y1="0" y2="0">${stops.join("")}</linearGradient></defs>`;
+    strich = "url(#pace)";
+  }
+  $("profil").innerHTML = punkte ? verlauf +
+    `<polygon points="0,70 ${punkte} 300,70" fill="${strich}" opacity="0.22"/>` +
+    `<polyline points="${punkte}" fill="none" stroke="${strich}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : "";
+  $("skala").innerHTML = grenzen ?
+    `<span>${tempo({ zu_fuss: d.zu_fuss, tempo_ms: grenzen[0] }).join(" ")}</span>` +
+    `<i style="background:linear-gradient(to right,${TURBO.join(",")})"></i>` +
+    `<span>${tempo({ zu_fuss: d.zu_fuss, tempo_ms: grenzen[1] }).join(" ")}</span>` : "";
+  const zeilen = splitZeilen(d);
+  $("splits").innerHTML = zeilen.length ?
+    `<div class="split kopf"><span>km</span><span></span><span class="r">${d.zu_fuss ? "min/km" : "km/h"}</span><span class="r">Höhe</span></div>` +
+    zeilen.map(([km, zeit, t, hm, anteil, v]) => `<div class="split"><span>${km}</span>` +
+      `<span><span class="balken" style="display:block;width:${Math.round(anteil * 100)}%;background:${tempoFarbe(v, grenzen) || linie}"></span></span>` +
+      `<span class="r">${t}</span><span class="r m">${hm}</span></div>`).join("") : "";
   const lagen = d.linie.map(p => [p[0], p[1]]);
   if (window.maplibregl) {
-    try { karteZeichnen(aufzeichnungen, farben); return; } catch (e) { karte = null; /* ohne WebGL */ }
+    try { karteZeichnen(aufzeichnungen, farben, grenzen); return; } catch (e) { karte = null; /* ohne WebGL */ }
   }
   svgSpur(lagen, linie);
 }
 let karteBereit = null;
-function karteZeichnen(aufzeichnungen, farben) {
+function karteZeichnen(aufzeichnungen, farben, grenzen) {
   // [lon, lat] - MapLibre will die Länge zuerst
   const linien = aufzeichnungen.map(a => a.linie.map(p => [p[1], p[0]]));
   const haupt = linien[0];
@@ -266,8 +344,13 @@ function karteZeichnen(aufzeichnungen, farben) {
     const punkt = (lage, f) => ({ type: "Feature", properties: { farbe: f },
                                   geometry: { type: "Point", coordinates: lage } });
     // Die erste Aufzeichnung obenauf, die weiteren Geräte darunter
-    karte.getSource("spuren").setData({ type: "FeatureCollection", features: linien.map((l, i) =>
-      linie(l, i ? { farbe: farben[1], breite: 4, rang: 0 } : { farbe: farben[0], breite: 5, rang: 1 })) });
+    // Die erste in der Pace-Farbe, Stück für Stück; ohne Tempo einfarbig
+    const erste = grenzen
+      ? stuecke(aufzeichnungen[0].linie, grenzen).map(s =>
+          linie(s.punkte.map(p => [p[1], p[0]]), { farbe: s.farbe, breite: 5, rang: 1 }))
+      : [linie(haupt, { farbe: farben[0], breite: 5, rang: 1 })];
+    karte.getSource("spuren").setData({ type: "FeatureCollection", features: linien.slice(1).map(l =>
+      linie(l, { farbe: farben[1], breite: 4, rang: 0 })).concat(erste) });
     karte.getSource("enden").setData({ type: "FeatureCollection", features: [
       punkt(haupt[0], farbe("--start")), punkt(haupt[haupt.length - 1], farben[0])] });
     const rahmen = new maplibregl.LngLatBounds(haupt[0], haupt[0]);
